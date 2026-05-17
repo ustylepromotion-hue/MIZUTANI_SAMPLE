@@ -1,24 +1,23 @@
 # ケアレポート デモ (mizutani-worker)
 
-訪問介護記録 → Claude sonnet で構造化レポート化するデモ。
+訪問介護記録 → DeepSeek で構造化レポート化するデモ。
 
-- Worker: `mizutani-worker`
+- Worker: `mizutani-worker` → https://mizutani-worker.ustyle-promotion.workers.dev
 - D1: `care-report-db`
-- Secret: `MIZUTANI_SAMPLE` (Anthropic APIキー)
-- Model: `claude-sonnet-4-6`
+- Secret: `MIZUTANI_SAMPLE` (DeepSeek APIキー)
+- Model: `deepseek-chat` (`response_format: { type: 'json_object' }` でJSON強制)
 
 ## ファイル構成
 
 ```
 care-report-demo/
-├── wrangler.toml              # Workers設定
-├── schema.sql                 # D1テーブル定義
-├── package.json               # npm scripts + wrangler依存
+├── wrangler.toml         # Workers設定
+├── schema.sql            # D1テーブル定義
+├── package.json          # npm scripts + wrangler依存
 ├── .gitignore
-├── .github/workflows/deploy.yml  # push時の自動デプロイ
 ├── src/
-│   ├── index.js               # Worker（API + HTML配信 + Claude呼び出し）
-│   └── index.html             # フロント（タブUI）
+│   ├── index.js          # Worker（API + HTML配信 + LLM呼び出し）
+│   └── index.html        # フロント（タブUI）
 └── README.md
 ```
 
@@ -42,48 +41,30 @@ care-report-demo/
 
 ---
 
-## デプロイ手順（GitHub Actions経由）
+## デプロイ
 
-`main` ブランチに push すると自動で `wrangler deploy` が走る構成。
-
-### 初回セットアップ（1回だけやる）
-
-#### 1. D1データベース作成（既に作成済みならスキップ）
+ローカルから直接 `wrangler deploy` する方式。wrangler が CF に OAuth login 済み前提。
 
 ```bash
+npm run deploy
+# = npx wrangler deploy
+```
+
+これだけ。30秒で本番反映。
+
+### 初回セットアップ（既存環境では不要）
+
+```bash
+# 1. D1作成（既存なら不要、本リポは database_id 設定済み）
 npx wrangler d1 create care-report-db
-```
 
-出力された `database_id` を `wrangler.toml` に貼る。本リポは既に `c835e3c1-...` で設定済み。
+# 2. schema 適用（テーブル変更時のみ、冪等）
+npm run db:init:remote
 
-#### 2. Anthropic APIキーをWorker secretとして登録
-
-```bash
+# 3. secret 登録（既存なら不要）
 npx wrangler secret put MIZUTANI_SAMPLE
+# → DeepSeek の API key を貼る
 ```
-
-プロンプトで `sk-ant-...` を貼り付け。
-
-#### 3. GitHub Secrets 登録（CI/CDのため）
-
-GitHubリポジトリの **Settings → Secrets and variables → Actions → New repository secret** で以下2つを登録：
-
-| Secret名 | 取得方法 |
-|----------|----------|
-| `CLOUDFLARE_API_TOKEN` | CF dashboard → 右上アイコン → My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" テンプレを使用 → 作成 |
-| `CLOUDFLARE_ACCOUNT_ID` | CF dashboard → Workers & Pages を開く → URL の `https://dash.cloudflare.com/<account_id>/...` の `<account_id>` 部分、または右サイドバーに表示 |
-
-### 通常のデプロイ
-
-```bash
-git add .
-git commit -m "..."
-git push origin main
-```
-
-→ GitHub Actions が走って自動でデプロイ。完了後 `https://mizutani-worker.<your-subdomain>.workers.dev` で動作。
-
-進捗は GitHubリポの **Actions** タブで確認。
 
 ---
 
@@ -91,9 +72,9 @@ git push origin main
 
 ```bash
 npm install
-echo "MIZUTANI_SAMPLE=sk-ant-..." > .dev.vars   # .gitignore済み
-npm run db:init:local                            # ローカルD1にschema適用
-npm run dev                                      # localhost:8787
+echo "MIZUTANI_SAMPLE=sk-..." > .dev.vars   # DeepSeekのAPIキー、.gitignore済み
+npm run db:init:local                        # ローカルSQLiteにschema適用
+npm run dev                                  # localhost:8787
 ```
 
 ログ：
@@ -108,4 +89,5 @@ npm run tail   # 本番Worker のログをストリーム
 - `wrangler.toml` の `database_id` を環境ごとに差し替えること
 - `.dev.vars` は絶対コミットしない（`.gitignore` 済み）
 - Worker内では `env.MIZUTANI_SAMPLE` で参照（HTMLには露出しない）
-- Claude APIはJSONモードがないため、システムプロンプトでJSON強制 + assistant prefill `{` で先頭を固定している
+- LLM呼び出し関数名が `callClaude()` のまま残ってる（命名がプロバイダと食い違うが動作には影響なし）
+- DeepSeek の JSON モード (`response_format: { type: 'json_object' }`) を使用、prefill ハック不要

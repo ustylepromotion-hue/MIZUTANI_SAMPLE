@@ -71,7 +71,7 @@ async function handleReport(request, env, cors) {
   return Response.json({ report: reportJson, history }, { headers: cors });
 }
 
-// ── Claude API Call ──
+// ── LLM (DeepSeek) API Call ──
 async function callClaude(apiKey, rawText, clientName, visitDate, history) {
   const historyBlock = history.length > 0
     ? `\n\n## 過去の記録（新しい順）\n${JSON.stringify(history, null, 2)}`
@@ -80,7 +80,7 @@ async function callClaude(apiKey, rawText, clientName, visitDate, history) {
   const systemPrompt = `あなたは訪問介護の記録を構造化するアシスタントです。
 ヘルパーが書いた生のメモや会話ログを読み取り、以下のJSON形式で出力してください。
 
-出力はJSON **のみ**。前置き・マークダウン・バッククォート一切不要。最初の文字は { で、最後の文字は } 。
+出力はJSON **のみ**。前置き・マークダウン・バッククォート一切不要。
 
 {
   "visit_date": "${visitDate}",
@@ -110,20 +110,19 @@ async function callClaude(apiKey, rawText, clientName, visitDate, history) {
 ${rawText}
 ${historyBlock}`;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'deepseek-chat',
       max_tokens: 2000,
-      system: systemPrompt,
+      response_format: { type: 'json_object' },
       messages: [
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
-        { role: 'assistant', content: '{' },
       ],
     }),
   });
@@ -131,14 +130,10 @@ ${historyBlock}`;
   const data = await res.json();
 
   if (!res.ok) {
-    throw new Error(`Claude API error: ${JSON.stringify(data)}`);
+    throw new Error(`LLM API error: ${JSON.stringify(data)}`);
   }
 
-  let text = data.content[0].text.trim();
-  // assistant prefill で開始した { を補完
-  if (!text.startsWith('{')) text = '{' + text;
-  // 末尾の余計な ``` などを除去
-  text = text.replace(/```json|```/g, '').trim();
+  const text = data.choices[0].message.content.replace(/```json|```/g, '').trim();
   return JSON.parse(text);
 }
 
