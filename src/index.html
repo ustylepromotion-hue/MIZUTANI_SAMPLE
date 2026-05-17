@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ケアレポート</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=JetBrains+Mono:wght@400&display=swap');
+
+:root {
+  --bg: #f8f7f4;
+  --surface: #ffffff;
+  --surface-alt: #f0efeb;
+  --border: #e2e0d8;
+  --text: #2c2c2c;
+  --text-sub: #6b6b6b;
+  --accent: #1a6b5a;
+  --accent-light: #e8f5f0;
+  --green: #2d8a56;
+  --yellow: #c49a2a;
+  --red: #c44b4b;
+  --radius: 12px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Noto Sans JP', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 16px 80px;
+}
+
+/* Header */
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--accent);
+}
+
+header .logo {
+  width: 40px; height: 40px;
+  background: var(--accent);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 20px; font-weight: 700;
+}
+
+header h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+header .sub {
+  font-size: 12px;
+  color: var(--text-sub);
+  margin-left: auto;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  background: var(--surface-alt);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.tab {
+  flex: 1;
+  padding: 10px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-sub);
+  transition: all 0.2s;
+}
+
+.tab.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* Panel */
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* Form */
+.field {
+  margin-bottom: 20px;
+}
+
+.field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-sub);
+  margin-bottom: 6px;
+  letter-spacing: 0.03em;
+}
+
+.field input, .field textarea {
+  width: 100%;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 15px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  transition: border 0.2s;
+  outline: none;
+}
+
+.field input:focus, .field textarea:focus {
+  border-color: var(--accent);
+}
+
+.field textarea {
+  min-height: 200px;
+  resize: vertical;
+  line-height: 1.8;
+}
+
+.field input[type="date"] {
+  max-width: 200px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+}
+
+.row .field { flex: 1; }
+
+/* Button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 28px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.btn-primary:hover { background: #155a4b; }
+.btn-primary:disabled {
+  background: var(--border);
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--surface-alt);
+  color: var(--text);
+  border: 1.5px solid var(--border);
+}
+
+/* Loading */
+.loading {
+  display: none;
+  text-align: center;
+  padding: 40px;
+  color: var(--text-sub);
+}
+
+.loading.show { display: block; }
+
+.spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 12px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Report */
+.report {
+  display: none;
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  overflow: hidden;
+  margin-top: 24px;
+}
+
+.report.show { display: block; }
+
+.report-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+
+.report-header .name {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.report-header .date {
+  font-size: 13px;
+  color: var(--text-sub);
+  margin-left: auto;
+}
+
+.severity-badge {
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.severity-green { background: #e8f5e9; color: var(--green); }
+.severity-yellow { background: #fff8e1; color: var(--yellow); }
+.severity-red { background: #fce4e4; color: var(--red); }
+
+.report-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-section:last-child { border-bottom: none; }
+
+.report-section h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.report-section p {
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.report-section ul {
+  list-style: none;
+  padding: 0;
+}
+
+.report-section li {
+  font-size: 14px;
+  padding: 4px 0 4px 18px;
+  position: relative;
+}
+
+.report-section li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.report-section.issues li::before { background: var(--yellow); }
+.report-section.challenges li::before { background: var(--red); }
+.report-section.recommendations li::before { background: var(--green); }
+
+.summary-box {
+  background: var(--accent-light);
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+/* JSON toggle */
+.json-toggle {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 20px;
+}
+
+.json-toggle button {
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-sub);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.json-block {
+  display: none;
+  padding: 16px 20px;
+  background: #1e1e1e;
+  overflow-x: auto;
+}
+
+.json-block.show { display: block; }
+
+.json-block pre {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Client list */
+.client-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.client-card {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.client-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+.client-card .cname {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.client-card .meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-sub);
+  text-align: right;
+}
+
+.client-card .meta span { display: block; }
+
+/* History timeline */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-bottom: 12px;
+  font-family: inherit;
+}
+
+.empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-sub);
+  font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .row { flex-direction: column; gap: 0; }
+  .app { padding: 16px 12px 60px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">C</div>
+    <h1>ケアレポート</h1>
+    <span class="sub">訪問介護記録 AI</span>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('input')">記録入力</button>
+    <button class="tab" onclick="switchTab('clients')">利用者一覧</button>
+  </div>
+
+  <!-- Input Panel -->
+  <div id="panel-input" class="panel active">
+    <div class="row">
+      <div class="field">
+        <label>利用者名</label>
+        <input type="text" id="clientName" placeholder="例：田中太郎">
+      </div>
+      <div class="field">
+        <label>訪問日</label>
+        <input type="date" id="visitDate">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>記録テキスト（会話ログ・メモなど）</label>
+      <textarea id="rawText" placeholder="ヘルパーのメモや会話ログをそのまま貼り付けてください。&#10;&#10;例：&#10;9時に到着。玄関の鍵が開いていた。声かけすると居間にいた。&#10;朝食はパンと牛乳を少し。食欲はあまりないとのこと。&#10;入浴介助を実施。右膝の痛みを訴えていた。&#10;服薬確認、朝の分は飲めていた。&#10;掃除機かけと洗濯物たたみ。&#10;11時退出。次回木曜日。"></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="generateBtn" onclick="generateReport()">
+      レポートを生成
+    </button>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p>記録を分析中...</p>
+    </div>
+
+    <div class="report" id="report"></div>
+  </div>
+
+  <!-- Clients Panel -->
+  <div id="panel-clients" class="panel">
+    <div id="clientsView">
+      <div class="client-list" id="clientList">
+        <div class="empty">まだ記録がありません</div>
+      </div>
+    </div>
+    <div id="historyView" style="display:none">
+      <button class="back-btn" onclick="showClientList()">← 一覧に戻る</button>
+      <h2 id="historyTitle" style="font-size:18px;margin-bottom:16px;"></h2>
+      <div class="timeline" id="historyTimeline"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'https://mizutani-worker.ustyle-promotion.workers.dev';
+
+// Init
+document.getElementById('visitDate').valueAsDate = new Date();
+
+// Tabs
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('active');
+  if (tab === 'clients') loadClients();
+}
+
+// Generate Report
+async function generateReport() {
+  const clientName = document.getElementById('clientName').value.trim();
+  const visitDate = document.getElementById('visitDate').value;
+  const rawText = document.getElementById('rawText').value.trim();
+
+  if (!clientName || !rawText) {
+    alert('利用者名と記録テキストを入力してください');
+    return;
+  }
+
+  const btn = document.getElementById('generateBtn');
+  const loading = document.getElementById('loading');
+  const reportEl = document.getElementById('report');
+
+  btn.disabled = true;
+  loading.classList.add('show');
+  reportEl.classList.remove('show');
+
+  try {
+    const res = await fetch(API + '/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_name: clientName, visit_date: visitDate, raw_text: rawText }),
+    });
+
+    const bodyText = await res.text();
+    logApi('POST /api/report', res.status, bodyText);
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' / ' + bodyText.slice(0, 500));
+
+    const data = JSON.parse(bodyText);
+    renderReport(data.report, reportEl);
+    reportEl.classList.add('show');
+  } catch (e) {
+    logApi('ERROR', '-', e.message);
+    alert('エラーが発生しました:\n' + e.message);
+  } finally {
+    btn.disabled = false;
+    loading.classList.remove('show');
+  }
+}
+
+// Render Report
+function renderReport(r, container) {
+  const sevLabel = { green: '通常', yellow: '要注意', red: '緊急' };
+  const sevClass = 'severity-' + (r.severity || 'green');
+
+  container.innerHTML = `
+    <div class="report-header">
+      <span class="name">${esc(r.client_name)}</span>
+      <span class="severity-badge ${sevClass}">${sevLabel[r.severity] || '通常'}</span>
+      <span class="date">${r.visit_date}</span>
+    </div>
+
+    <div class="report-section">
+      <h3>実施作業</h3>
+      <ul>${(r.tasks_performed || []).map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+    </div>
+
+    <div class="report-section">
+      <h3>利用者の状態</h3>
+      <p>${esc(r.client_condition || '')}</p>
+    </div>
+
+    <div class="report-section">
+      <h3>利用者の癖・特記事項</h3>
+      <p>${esc(r.client_habits || '')}</p>
+    </div>
+
+    <div class="report-section issues">
+      <h3>問題点</h3>
+      <ul>${(r.issues || []).map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+    </div>
+
+    <div class="report-section challenges">
+      <h3>課題</h3>
+      <ul>${(r.challenges || []).map(c => `<li>${esc(c)}</li>`).join('')}</ul>
+    </div>
+
+    <div class="report-section recommendations">
+      <h3>次回への対処レコメンド</h3>
+      <ul>${(r.recommendations || []).map(rec => `<li>${esc(rec)}</li>`).join('')}</ul>
+    </div>
+
+    <div class="report-section">
+      <h3>前回からの変化</h3>
+      <p>${esc(r.changes_from_last || '初回記録')}</p>
+    </div>
+
+    <div class="report-section">
+      <h3>管理者向けサマリー</h3>
+      <div class="summary-box">${esc(r.summary_jp || '')}</div>
+    </div>
+
+    <div class="json-toggle">
+      <button onclick="toggleJson(this)">JSON表示</button>
+    </div>
+    <div class="json-block">
+      <pre>${esc(JSON.stringify(r, null, 2))}</pre>
+    </div>
+  `;
+}
+
+function toggleJson(btn) {
+  const block = btn.parentElement.nextElementSibling;
+  block.classList.toggle('show');
+  btn.textContent = block.classList.contains('show') ? 'JSON非表示' : 'JSON表示';
+}
+
+// Client List
+async function loadClients() {
+  try {
+    const res = await fetch(API + '/api/clients');
+    const data = await res.json();
+    const list = document.getElementById('clientList');
+
+    if (!data.clients || data.clients.length === 0) {
+      list.innerHTML = '<div class="empty">まだ記録がありません</div>';
+      return;
+    }
+
+    list.innerHTML = data.clients.map(c => `
+      <div class="client-card" onclick="loadHistory('${esc(c.name)}')">
+        <span class="cname">${esc(c.name)}</span>
+        <div class="meta">
+          <span>${c.record_count}件の記録</span>
+          <span>最終: ${c.last_visit || '-'}</span>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// History
+async function loadHistory(name) {
+  document.getElementById('clientsView').style.display = 'none';
+  document.getElementById('historyView').style.display = 'block';
+  document.getElementById('historyTitle').textContent = name + ' の記録';
+
+  const timeline = document.getElementById('historyTimeline');
+  timeline.innerHTML = '<div class="loading show"><div class="spinner"></div></div>';
+
+  try {
+    const res = await fetch(API + '/api/history/' + encodeURIComponent(name));
+    const data = await res.json();
+
+    if (!data.history || data.history.length === 0) {
+      timeline.innerHTML = '<div class="empty">記録なし</div>';
+      return;
+    }
+
+    timeline.innerHTML = data.history.map(r => {
+      const div = document.createElement('div');
+      div.className = 'report show';
+      renderReport(r, div);
+      return div.outerHTML;
+    }).join('');
+  } catch (e) {
+    timeline.innerHTML = '<div class="empty">読み込みエラー</div>';
+  }
+}
+
+function showClientList() {
+  document.getElementById('clientsView').style.display = 'block';
+  document.getElementById('historyView').style.display = 'none';
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// ── Debug Log Panel ──
+function logApi(label, status, body) {
+  const panel = document.getElementById('debugLog');
+  if (!panel) return;
+  const ts = new Date().toLocaleTimeString('ja-JP');
+  const entry = document.createElement('div');
+  entry.style.cssText = 'border-bottom:1px solid #444;padding:6px 0;white-space:pre-wrap;word-break:break-all;';
+  entry.innerHTML = '<b style="color:#7fd1ff;">[' + ts + '] ' + esc(label) + ' → ' + esc(String(status)) + '</b>\n' + esc(String(body));
+  panel.prepend(entry);
+}
+function toggleLog() {
+  const w = document.getElementById('debugWrap');
+  w.style.display = w.style.display === 'none' ? 'block' : 'none';
+}
+function clearLog() {
+  document.getElementById('debugLog').innerHTML = '';
+}
+window.addEventListener('error', e => logApi('JS ERROR', '-', e.message + ' @ ' + e.filename + ':' + e.lineno));
+window.addEventListener('unhandledrejection', e => logApi('UNHANDLED', '-', e.reason?.message || String(e.reason)));
+</script>
+
+<div id="debugWrap" style="position:fixed;bottom:0;left:0;right:0;max-height:40vh;background:#1a1a1a;color:#eee;font:12px/1.5 monospace;border-top:2px solid #7fd1ff;z-index:9999;display:block;">
+  <div style="padding:6px 10px;background:#222;display:flex;gap:8px;align-items:center;">
+    <b style="color:#7fd1ff;">🪵 API LOG</b>
+    <button onclick="clearLog()" style="font-size:11px;padding:2px 8px;">クリア</button>
+    <button onclick="toggleLog()" style="font-size:11px;padding:2px 8px;margin-left:auto;">閉じる</button>
+  </div>
+  <div id="debugLog" style="padding:8px 12px;overflow:auto;max-height:calc(40vh - 36px);"></div>
+</div>
+<button onclick="toggleLog()" style="position:fixed;bottom:8px;right:8px;z-index:10000;padding:6px 12px;background:#7fd1ff;border:0;border-radius:4px;cursor:pointer;font-weight:bold;">🪵 LOG</button>
+
+</body>
+</html>

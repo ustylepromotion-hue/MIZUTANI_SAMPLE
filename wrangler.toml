@@ -1,0 +1,19 @@
+name = "mizutani-worker"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+
+# Bundle index.html as a text module so `import HTML from './index.html'` works
+rules = [
+  { type = "Text", globs = ["**/*.html"], fallthrough = true }
+]
+
+[vars]
+ENVIRONMENT = "production"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "care-report-db"
+database_id = "c835e3c1-6254-4c15-aa6f-d6f0381def16"
+
+# ── Secrets（本番投入時にCLIで設定。wrangler.tomlには書かない）──
+# wrangler secret put MIZUTANI_SAMPLE

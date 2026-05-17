@@ -1,0 +1,15 @@
+{
+  "name": "mizutani-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail mizutani-worker --format pretty",
+    "db:init:remote": "wrangler d1 execute care-report-db --remote --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute care-report-db --local --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.83.0"
+  }
+}
