@@ -1,93 +1,52 @@
-# ケアレポート デモ (mizutani-worker)
+# ISSEIレポートメーカー (mizutani-worker)
 
-訪問介護記録 → DeepSeek で構造化レポート化するデモ。
+訪問介護記録 → DeepSeek で構造化レポート化 + 過去記録RAG検索アプリ。
 
-- Worker: `mizutani-worker` → https://mizutani-worker.ustyle-promotion.workers.dev
+- **アプリ本体**: https://mizutani-worker.ustyle-promotion.workers.dev
+- **公開URL（このページ）**: https://ustylepromotion-hue.github.io/MIZUTANI_SAMPLE/ → Worker本体へリダイレクト
+- Worker: `mizutani-worker`
 - D1: `care-report-db`
 - Secret: `MIZUTANI_SAMPLE` (DeepSeek APIキー)
-- Model: `deepseek-chat` (`response_format: { type: 'json_object' }` でJSON強制)
+- Model: `deepseek-chat` (JSON mode)
 
-## ファイル構成
+## 機能
 
-```
-care-report-demo/
-├── wrangler.toml         # Workers設定
-├── schema.sql            # D1テーブル定義
-├── package.json          # npm scripts + wrangler依存
-├── .gitignore
-├── src/
-│   ├── index.js          # Worker（API + HTML配信 + LLM呼び出し）
-│   └── index.html        # フロント（タブUI）
-└── README.md
-```
+- 生記録テキスト→構造化レポート（severity / tasks / issues / challenges / recommendations / changes_from_last / summary）
+- レポートはブラウザ上で**人間が編集可能**（黄色枠のcontenteditable）
+- 利用者ID `C-XXXXXX`（衝突回避ランダム）、同姓同名OK
+- 利用者一覧で **編集 / 削除**（削除は名前タイピング確認）
+- 履歴は**日付ごとアコーディオン**、前後ナビ＋全開閉
+- **RAG検索**: 過去記録をLLMが巡回。出典内事実のみ回答、推測禁止。事実ベース提案と一般知識補足は可
 
-## API エンドポイント
+## API
 
 | Method | Path | 説明 |
 |--------|------|------|
-| POST | /api/report | レポート生成（生記録→構造化JSON、D1保存） |
+| POST | /api/report | レポート生成 |
 | GET  | /api/clients | 利用者一覧 |
-| GET  | /api/history/:name | 利用者の過去20件 |
-
-リクエストbody例（`POST /api/report`）：
-
-```json
-{
-  "client_name": "田中ヨシ子",
-  "visit_date": "2026-05-17",
-  "raw_text": "玄関チャイム3回ならしたが応答なし..."
-}
-```
-
----
+| GET  | /api/history/:key | 履歴（public_id or name） |
+| PATCH | /api/clients/:public_id | 利用者名変更 |
+| DELETE | /api/clients/:public_id | 利用者削除（記録もカスケード） |
+| POST | /api/ask/:public_id | RAG検索 |
 
 ## デプロイ
 
-ローカルから直接 `wrangler deploy` する方式。wrangler が CF に OAuth login 済み前提。
-
 ```bash
-npm run deploy
-# = npx wrangler deploy
+npm run deploy   # = npx wrangler deploy
 ```
 
-これだけ。30秒で本番反映。
-
-### 初回セットアップ（既存環境では不要）
-
+スキーマ変更時:
 ```bash
-# 1. D1作成（既存なら不要、本リポは database_id 設定済み）
-npx wrangler d1 create care-report-db
-
-# 2. schema 適用（テーブル変更時のみ、冪等）
-npm run db:init:remote
-
-# 3. secret 登録（既存なら不要）
-npx wrangler secret put MIZUTANI_SAMPLE
-# → DeepSeek の API key を貼る
+npx wrangler d1 execute care-report-db --remote --file=migrations/<file>.sql
 ```
 
----
-
-## ローカル開発（必要なら）
-
+バックアップ:
 ```bash
-npm install
-echo "MIZUTANI_SAMPLE=sk-..." > .dev.vars   # DeepSeekのAPIキー、.gitignore済み
-npm run db:init:local                        # ローカルSQLiteにschema適用
-npm run dev                                  # localhost:8787
+npx wrangler d1 export care-report-db --remote --output=backup.sql
 ```
-
-ログ：
-```bash
-npm run tail   # 本番Worker のログをストリーム
-```
-
----
 
 ## 注意
 
-- `wrangler.toml` の `database_id` を環境ごとに差し替えること
-- `.dev.vars` は絶対コミットしない（`.gitignore` 済み）
-- Worker内では `env.MIZUTANI_SAMPLE` で参照（HTMLには露出しない）
-- LLM呼び出し関数名が `callClaude()` のまま残ってる（命名がプロバイダと食い違うが動作には影響なし）
-- DeepSeek の JSON モード (`response_format: { type: 'json_object' }`) を使用、prefill ハック不要
+- `.dev.vars` は絶対コミットしない
+- `env.MIZUTANI_SAMPLE` は DeepSeek APIキー
+- LLM関数名が `callClaude()` のまま残存（命名と実体の食い違いだが動作には影響なし）
