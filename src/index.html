@@ -695,15 +695,18 @@ header .sub {
 
   <div class="tabs">
     <button class="tab active" onclick="switchTab('input')">記録入力</button>
-    <button class="tab" onclick="switchTab('clients')">利用者一覧</button>
+    <button class="tab" onclick="switchTab('clients')">ニックネーム一覧</button>
   </div>
 
   <!-- Input Panel -->
   <div id="panel-input" class="panel active">
+    <div style="background:#fff8d6;border:1.5px solid #d4b85a;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#5a4a1a;line-height:1.6;">
+      ⚠️ 個人情報保護のため、本名は入力せずニックネーム（例: たろうさん, Aさん）でご登録ください。
+    </div>
     <div class="row">
       <div class="field">
-        <label>利用者名</label>
-        <input type="text" id="clientName" placeholder="例：田中太郎">
+        <label>ニックネーム</label>
+        <input type="text" id="clientName" placeholder="例：たろうさん / Aさん（本名NG）">
       </div>
       <div class="field">
         <label>訪問日</label>
@@ -743,7 +746,7 @@ header .sub {
       <!-- RAG 検索ボックス -->
       <div class="rag-box">
         <h3>🔍 過去記録に質問する</h3>
-        <p class="desc">この利用者の過去レポートをAIが巡回して回答します。<b>記録に書かれた事実のみ</b>を根拠とし、事実に基づく提案や一般的な介護知識の補足をしてくれます。</p>
+        <p class="desc">この方の過去レポートをAIが巡回して回答します。<b>記録に書かれた事実のみ</b>を根拠とし、事実に基づく提案や一般的な介護知識の補足をしてくれます。</p>
         <div class="rag-input-row">
           <input type="text" id="ragInput" placeholder="例: 入浴を嫌がる傾向は？ 服薬で気になることは？">
           <button id="ragBtn" onclick="askRag()">質問</button>
@@ -781,7 +784,7 @@ async function generateReport() {
   const rawText = document.getElementById('rawText').value.trim();
 
   if (!clientName || !rawText) {
-    alert('利用者名と記録テキストを入力してください');
+    alert('ニックネームと記録テキストを入力してください');
     return;
   }
 
@@ -839,12 +842,12 @@ function renderReport(r, container) {
     </div>
 
     <div class="report-section">
-      <h3>利用者の状態</h3>
+      <h3>当日の状態</h3>
       <p ${editable}>${esc(r.client_condition || '')}</p>
     </div>
 
     <div class="report-section">
-      <h3>利用者の癖・特記事項</h3>
+      <h3>癖・特記事項</h3>
       <p ${editable}>${esc(r.client_habits || '')}</p>
     </div>
 
@@ -1151,7 +1154,7 @@ window.addEventListener('unhandledrejection', e => logApi('UNHANDLED', '-', e.re
 <!-- Rename Modal -->
 <div id="renameModal" class="modal-bg" onclick="if(event.target===this)closeRenameModal()">
   <div class="modal">
-    <h3>✏ 利用者名を変更</h3>
+    <h3>✏ ニックネームを変更</h3>
     <p id="renameSubtitle" style="font-family:monospace;font-size:12px;"></p>
     <input type="hidden" id="renamePid">
     <input type="text" id="renameInput" placeholder="新しい名前">
@@ -1167,9 +1170,9 @@ window.addEventListener('unhandledrejection', e => logApi('UNHANDLED', '-', e.re
   <div class="modal">
     <h3 class="warn" style="color:var(--red);">🗑 本当に削除しますか？</h3>
     <p><b id="delName"></b> さんと、関連する <b id="delCount"></b> 件の記録がすべて削除されます。<br><span class="warn">この操作は取り消せません。</span></p>
-    <p style="font-size:13px;">確認のため、利用者名を入力してください：</p>
+    <p style="font-size:13px;">確認のため、ニックネームを入力してください：</p>
     <input type="hidden" id="delPid">
-    <input type="text" id="delConfirmInput" oninput="onDelConfirmInput()" placeholder="利用者名を入力">
+    <input type="text" id="delConfirmInput" oninput="onDelConfirmInput()" placeholder="ニックネームを入力">
     <div class="modal-actions">
       <button class="cancel" onclick="closeDeleteModal()">キャンセル</button>
       <button class="danger" id="delConfirmBtn" onclick="confirmDelete()" disabled style="opacity:0.5;">削除する</button>

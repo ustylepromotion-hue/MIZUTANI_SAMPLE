@@ -82,7 +82,35 @@ async function handleReport(request, env, cors) {
     'INSERT INTO care_records (client_id, visit_date, raw_text, report_json) VALUES (?, ?, ?, ?)'
   ).bind(client.client_id, date, raw_text, JSON.stringify(reportJson)).run();
 
+  // ── ダイジェスト増分更新（LLMが読みやすい形で蓄積）──
+  const block = buildDigestBlock(date, reportJson);
+  const current = await env.DB.prepare('SELECT digest_md FROM clients WHERE client_id = ?').bind(client.client_id).first();
+  const updated = block + (current?.digest_md ? '\n' + current.digest_md : '');
+  await env.DB.prepare('UPDATE clients SET digest_md = ? WHERE client_id = ?').bind(updated, client.client_id).run();
+
   return Response.json({ report: reportJson, history }, { headers: cors });
+}
+
+// ── ダイジェストMD構築 ──
+function buildDigestBlock(date, r) {
+  const sev = r.severity || 'green';
+  const lines = [`## ${date} [severity: ${sev}]`];
+  if (r.tasks_performed?.length) lines.push(`- 実施: ${r.tasks_performed.join(' / ')}`);
+  if (r.client_condition) lines.push(`- 状態: ${r.client_condition}`);
+  if (r.client_habits) lines.push(`- 癖/特記: ${r.client_habits}`);
+  if (r.issues?.length) lines.push(`- 問題: ${r.issues.join(' / ')}`);
+  if (r.challenges?.length) lines.push(`- 課題: ${r.challenges.join(' / ')}`);
+  if (r.recommendations?.length) lines.push(`- 次回提案: ${r.recommendations.join(' / ')}`);
+  if (r.changes_from_last && r.changes_from_last !== '初回記録') lines.push(`- 前回比: ${r.changes_from_last}`);
+  if (r.summary_jp) lines.push(`- 要約: ${r.summary_jp}`);
+  return lines.join('\n') + '\n';
+}
+
+async function buildFullDigest(clientId, env) {
+  const records = await env.DB.prepare(
+    'SELECT visit_date, report_json FROM care_records WHERE client_id = ? ORDER BY visit_date DESC'
+  ).bind(clientId).all();
+  return records.results.map(r => buildDigestBlock(r.visit_date, JSON.parse(r.report_json))).join('\n');
 }
 
 // ── LLM (DeepSeek) API Call ──
@@ -93,6 +121,7 @@ async function callClaude(apiKey, rawText, clientName, visitDate, history) {
 
   const systemPrompt = `あなたは訪問介護の記録を構造化するアシスタントです。
 ヘルパーが書いた生のメモや会話ログを読み取り、以下のJSON形式で出力してください。
+プライバシー保護のため、利用者は本名ではなくニックネームで呼ばれます。出力でも"client_name"にはニックネームをそのまま入れること。
 
 出力はJSON **のみ**。前置き・マークダウン・バッククォート一切不要。
 
@@ -188,38 +217,38 @@ async function handleAsk(publicId, request, env, cors) {
   const q = (question || '').trim();
   if (!q) return Response.json({ error: 'question required' }, { status: 400, headers: cors });
 
-  let client = await env.DB.prepare('SELECT client_id, public_id, name FROM clients WHERE public_id = ?').bind(publicId).first();
-  if (!client) client = await env.DB.prepare('SELECT client_id, public_id, name FROM clients WHERE name = ?').bind(publicId).first();
+  let client = await env.DB.prepare('SELECT client_id, public_id, name, digest_md FROM clients WHERE public_id = ?').bind(publicId).first();
+  if (!client) client = await env.DB.prepare('SELECT client_id, public_id, name, digest_md FROM clients WHERE name = ?').bind(publicId).first();
   if (!client) return Response.json({ error: 'client not found' }, { status: 404, headers: cors });
 
-  const records = await env.DB.prepare(
-    'SELECT visit_date, report_json FROM care_records WHERE client_id = ? ORDER BY visit_date DESC LIMIT 50'
-  ).bind(client.client_id).all();
-
-  if (!records.results.length) {
-    return Response.json({ answer: 'この利用者の記録がまだありません。', sources: [] }, { headers: cors });
+  // ダイジェスト未構築（既存データ）の場合は遅延ビルド
+  let digest = client.digest_md;
+  if (!digest) {
+    digest = await buildFullDigest(client.client_id, env);
+    if (digest) {
+      await env.DB.prepare('UPDATE clients SET digest_md = ? WHERE client_id = ?').bind(digest, client.client_id).run();
+    }
   }
 
-  const sources = records.results.map((r, i) => {
-    const rep = JSON.parse(r.report_json);
-    return `### [出典${i + 1}] ${r.visit_date}\n${JSON.stringify(rep, null, 2)}`;
-  }).join('\n\n');
+  if (!digest) {
+    return Response.json({ answer: 'この方の記録がまだありません。', sources: [] }, { headers: cors });
+  }
 
-  const systemPrompt = `あなたは訪問介護記録の分析アシスタントです。利用者「${client.name}」の過去記録を読み、ユーザーの質問に答えます。
+  const systemPrompt = `あなたは訪問介護記録の分析アシスタントです。ニックネーム「${client.name}」の方の過去記録ダイジェスト（Markdown）を読み、ユーザーの質問に答えます。
 
 【絶対ルール】
-1. 提供された記録内に明示的に書かれた事実のみを根拠に回答する。推測・憶測・想像は禁止。
-2. 記録に書かれていない事実を断定してはいけない。該当情報が無ければ「記録にはありません」と簡潔に伝える。
+1. ダイジェスト内に明示的に書かれた事実のみを根拠に回答する。推測・憶測・想像は禁止。
+2. 記録に無い事実を断定してはいけない。該当情報が無ければ「記録にはありません」と簡潔に伝える。
 3. 事実に基づく実務的な提案や、介護・医療・生活援助の一般知識による補足は可能。
-4. ユーザーが「出典」「ソース」「どの日の記録か」等を明示的に求めた場合のみ、訪問日を添える。それ以外は出典表記を出さない。
+4. ユーザーが「出典」「ソース」「どの日か」等を明示的に求めた場合のみ訪問日を添える。それ以外は日付や出典表記を出さない。
+5. プライバシー保護のため本名は不明。ニックネームのみで指す。
 
 【出力スタイル】
 - とにかく簡潔に。3〜5行以内が目安。
 - 結論を先に。前置き・自己紹介・「ご質問ありがとうございます」等は禁止。
-- 過剰な箇条書き・見出し・装飾は禁止。普通の文で短く答える。
-- 「※一般情報」「[出典N]」等のラベルは、ユーザーが根拠を聞いた時だけ使う。`;
+- 過剰な箇条書き・見出し・装飾は禁止。普通の文で短く答える。`;
 
-  const userMessage = `# 質問\n${q}\n\n# 利用者の過去記録（新しい順、最大50件）\n${sources}`;
+  const userMessage = `# 質問\n${q}\n\n# この方の過去記録ダイジェスト（新しい順）\n${digest}`;
 
   const res = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
@@ -239,7 +268,6 @@ async function handleAsk(publicId, request, env, cors) {
 
   return Response.json({
     answer: data.choices[0].message.content,
-    sources: records.results.map((r, i) => ({ index: i + 1, visit_date: r.visit_date })),
   }, { headers: cors });
 }
 
