@@ -743,7 +743,7 @@ header .sub {
       <!-- RAG 検索ボックス -->
       <div class="rag-box">
         <h3>🔍 過去記録に質問する</h3>
-        <p class="desc">この利用者の過去レポートをLLMが巡回して回答します。<b>記録に書かれた事実のみ</b>を根拠とし、推測は禁止。事実に基づく提案や一般的な介護知識の補足は可能です。</p>
+        <p class="desc">この利用者の過去レポートをAIが巡回して回答します。<b>記録に書かれた事実のみ</b>を根拠とし、事実に基づく提案や一般的な介護知識の補足をしてくれます。</p>
         <div class="rag-input-row">
           <input type="text" id="ragInput" placeholder="例: 入浴を嫌がる傾向は？ 服薬で気になることは？" onkeydown="if(event.key==='Enter')askRag()">
           <button id="ragBtn" onclick="askRag()">質問</button>
