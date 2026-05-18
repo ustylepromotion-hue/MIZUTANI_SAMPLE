@@ -5,7 +5,7 @@ export default {
     const url = new URL(request.url);
     const cors = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     };
 
@@ -24,6 +24,16 @@ export default {
       if (url.pathname.startsWith('/api/history/') && request.method === 'GET') {
         const clientName = decodeURIComponent(url.pathname.split('/api/history/')[1]);
         return await handleHistory(clientName, env, cors);
+      }
+      const askMatch = url.pathname.match(/^\/api\/ask\/([^/]+)$/);
+      if (askMatch && request.method === 'POST') {
+        return await handleAsk(decodeURIComponent(askMatch[1]), request, env, cors);
+      }
+      const clientMatch = url.pathname.match(/^\/api\/clients\/([^/]+)$/);
+      if (clientMatch) {
+        const publicId = decodeURIComponent(clientMatch[1]);
+        if (request.method === 'PATCH') return await handleClientRename(publicId, request, env, cors);
+        if (request.method === 'DELETE') return await handleClientDelete(publicId, env, cors);
       }
 
       // Serve HTML
@@ -46,9 +56,13 @@ async function handleReport(request, env, cors) {
 
   const date = visit_date || new Date().toISOString().split('T')[0];
 
-  // Upsert client
-  await env.DB.prepare('INSERT OR IGNORE INTO clients (name) VALUES (?)').bind(client_name).run();
-  const client = await env.DB.prepare('SELECT client_id FROM clients WHERE name = ?').bind(client_name).first();
+  // Upsert client（同名は既存を使い回す。同姓同名を分けたい場合は別途編集で改名）
+  let client = await env.DB.prepare('SELECT client_id, public_id FROM clients WHERE name = ? ORDER BY client_id ASC LIMIT 1').bind(client_name).first();
+  if (!client) {
+    const publicId = await generateUniquePublicId(env);
+    await env.DB.prepare('INSERT INTO clients (public_id, name) VALUES (?, ?)').bind(publicId, client_name).run();
+    client = await env.DB.prepare('SELECT client_id, public_id FROM clients WHERE public_id = ?').bind(publicId).first();
+  }
 
   // Fetch past records (latest 10)
   const pastRecords = await env.DB.prepare(
@@ -140,14 +154,114 @@ ${historyBlock}`;
 // ── Client List ──
 async function handleClients(env, cors) {
   const result = await env.DB.prepare(
-    'SELECT c.name, COUNT(r.record_id) as record_count, MAX(r.visit_date) as last_visit FROM clients c LEFT JOIN care_records r ON c.client_id = r.client_id GROUP BY c.client_id ORDER BY last_visit DESC'
+    'SELECT c.public_id, c.name, COUNT(r.record_id) as record_count, MAX(r.visit_date) as last_visit FROM clients c LEFT JOIN care_records r ON c.client_id = r.client_id GROUP BY c.client_id ORDER BY last_visit DESC'
   ).all();
   return Response.json({ clients: result.results }, { headers: cors });
 }
 
+// ── 利用者IDの一意生成（衝突したら再試行） ──
+async function generateUniquePublicId(env) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 紛らわしいI,O,0,1除外
+  for (let attempt = 0; attempt < 8; attempt++) {
+    let id = 'C-';
+    const bytes = crypto.getRandomValues(new Uint8Array(6));
+    for (const b of bytes) id += chars[b % chars.length];
+    const exists = await env.DB.prepare('SELECT 1 FROM clients WHERE public_id = ?').bind(id).first();
+    if (!exists) return id;
+  }
+  throw new Error('public_id生成に失敗（衝突多発）');
+}
+
+// ── Client Rename ──
+async function handleClientRename(publicId, request, env, cors) {
+  const { name } = await request.json();
+  const trimmed = (name || '').trim();
+  if (!trimmed) return Response.json({ error: 'name required' }, { status: 400, headers: cors });
+  const result = await env.DB.prepare('UPDATE clients SET name = ? WHERE public_id = ?').bind(trimmed, publicId).run();
+  if (!result.meta.changes) return Response.json({ error: 'not found' }, { status: 404, headers: cors });
+  return Response.json({ ok: true, public_id: publicId, name: trimmed }, { headers: cors });
+}
+
+// ── RAG: 過去対処を巡回してLLMが回答 ──
+async function handleAsk(publicId, request, env, cors) {
+  const { question } = await request.json();
+  const q = (question || '').trim();
+  if (!q) return Response.json({ error: 'question required' }, { status: 400, headers: cors });
+
+  let client = await env.DB.prepare('SELECT client_id, public_id, name FROM clients WHERE public_id = ?').bind(publicId).first();
+  if (!client) client = await env.DB.prepare('SELECT client_id, public_id, name FROM clients WHERE name = ?').bind(publicId).first();
+  if (!client) return Response.json({ error: 'client not found' }, { status: 404, headers: cors });
+
+  const records = await env.DB.prepare(
+    'SELECT visit_date, report_json FROM care_records WHERE client_id = ? ORDER BY visit_date DESC LIMIT 50'
+  ).bind(client.client_id).all();
+
+  if (!records.results.length) {
+    return Response.json({ answer: 'この利用者の記録がまだありません。', sources: [] }, { headers: cors });
+  }
+
+  const sources = records.results.map((r, i) => {
+    const rep = JSON.parse(r.report_json);
+    return `### [出典${i + 1}] ${r.visit_date}\n${JSON.stringify(rep, null, 2)}`;
+  }).join('\n\n');
+
+  const systemPrompt = `あなたは訪問介護記録の分析アシスタントです。利用者「${client.name}」(ID: ${client.public_id}) の過去記録を読み、ユーザーの質問に答えます。
+
+【絶対ルール】
+1. 提供された「出典」内に明示的に書かれた事実のみを根拠に回答する。推測・憶測・想像での回答は禁止。
+2. 出典に書かれていない事実を断定してはいけない。「記録には記載がありません」と明示する。
+3. ただし以下は許可:
+   - 出典の事実に基づく実務的な提案・対処案（例: 「過去2回入浴を拒否しているため、次回は声かけのタイミングを朝に変える提案ができます」）
+   - 介護・医療・生活援助に関する一般知識を補助情報として添える（その場合は「※一般情報」と明記）
+4. 回答中で事実を述べる際は必ず [出典N] の形で参照箇所を示す（例: [出典3]）。
+5. 出典に該当情報が無い質問には「該当する記録がありません」と答える。創作しない。
+6. 回答は簡潔に。箇条書きを活用。冗長な前置きは禁止。
+
+出力形式:
+- 回答（事実 + [出典N] 引用）
+- 必要なら「提案」セクション
+- 必要なら「※一般情報」セクション`;
+
+  const userMessage = `# 質問\n${q}\n\n# 利用者の過去記録（新しい順、最大50件）\n${sources}`;
+
+  const res = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${env.MIZUTANI_SAMPLE}` },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      max_tokens: 1500,
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`LLM error: ${JSON.stringify(data)}`);
+
+  return Response.json({
+    answer: data.choices[0].message.content,
+    sources: records.results.map((r, i) => ({ index: i + 1, visit_date: r.visit_date })),
+  }, { headers: cors });
+}
+
+// ── Client Delete (cascade) ──
+async function handleClientDelete(publicId, env, cors) {
+  const client = await env.DB.prepare('SELECT client_id FROM clients WHERE public_id = ?').bind(publicId).first();
+  if (!client) return Response.json({ error: 'not found' }, { status: 404, headers: cors });
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM care_records WHERE client_id = ?').bind(client.client_id),
+    env.DB.prepare('DELETE FROM clients WHERE client_id = ?').bind(client.client_id),
+  ]);
+  return Response.json({ ok: true }, { headers: cors });
+}
+
 // ── History ──
-async function handleHistory(clientName, env, cors) {
-  const client = await env.DB.prepare('SELECT client_id FROM clients WHERE name = ?').bind(clientName).first();
+async function handleHistory(key, env, cors) {
+  // public_id優先、なければname
+  let client = await env.DB.prepare('SELECT client_id FROM clients WHERE public_id = ?').bind(key).first();
+  if (!client) client = await env.DB.prepare('SELECT client_id FROM clients WHERE name = ?').bind(key).first();
   if (!client) {
     return Response.json({ history: [] }, { headers: cors });
   }
