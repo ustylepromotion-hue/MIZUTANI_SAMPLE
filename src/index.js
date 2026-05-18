@@ -82,35 +82,35 @@ async function handleReport(request, env, cors) {
     'INSERT INTO care_records (client_id, visit_date, raw_text, report_json) VALUES (?, ?, ?, ?)'
   ).bind(client.client_id, date, raw_text, JSON.stringify(reportJson)).run();
 
-  // ── ダイジェスト増分更新（LLMが読みやすい形で蓄積）──
-  const block = buildDigestBlock(date, reportJson);
-  const current = await env.DB.prepare('SELECT digest_md FROM clients WHERE client_id = ?').bind(client.client_id).first();
-  const updated = block + (current?.digest_md ? '\n' + current.digest_md : '');
-  await env.DB.prepare('UPDATE clients SET digest_md = ? WHERE client_id = ?').bind(updated, client.client_id).run();
+  // ── ダイジェスト増分更新（JSON配列、新しい順、LLM/機械処理しやすい形）──
+  const entry = buildDigestEntry(date, reportJson);
+  const current = await env.DB.prepare('SELECT digest_json FROM clients WHERE client_id = ?').bind(client.client_id).first();
+  const arr = JSON.parse(current?.digest_json || '[]');
+  arr.unshift(entry);
+  await env.DB.prepare('UPDATE clients SET digest_json = ? WHERE client_id = ?').bind(JSON.stringify(arr), client.client_id).run();
 
   return Response.json({ report: reportJson, history }, { headers: cors });
 }
 
-// ── ダイジェストMD構築 ──
-function buildDigestBlock(date, r) {
-  const sev = r.severity || 'green';
-  const lines = [`## ${date} [severity: ${sev}]`];
-  if (r.tasks_performed?.length) lines.push(`- 実施: ${r.tasks_performed.join(' / ')}`);
-  if (r.client_condition) lines.push(`- 状態: ${r.client_condition}`);
-  if (r.client_habits) lines.push(`- 癖/特記: ${r.client_habits}`);
-  if (r.issues?.length) lines.push(`- 問題: ${r.issues.join(' / ')}`);
-  if (r.challenges?.length) lines.push(`- 課題: ${r.challenges.join(' / ')}`);
-  if (r.recommendations?.length) lines.push(`- 次回提案: ${r.recommendations.join(' / ')}`);
-  if (r.changes_from_last && r.changes_from_last !== '初回記録') lines.push(`- 前回比: ${r.changes_from_last}`);
-  if (r.summary_jp) lines.push(`- 要約: ${r.summary_jp}`);
-  return lines.join('\n') + '\n';
+// ── ダイジェストエントリ（1訪問分のコンパクトなJSONオブジェクト）──
+function buildDigestEntry(date, r) {
+  const e = { visit_date: date, severity: r.severity || 'green' };
+  if (r.tasks_performed?.length) e.tasks = r.tasks_performed;
+  if (r.client_condition) e.condition = r.client_condition;
+  if (r.client_habits) e.habits = r.client_habits;
+  if (r.issues?.length) e.issues = r.issues;
+  if (r.challenges?.length) e.challenges = r.challenges;
+  if (r.recommendations?.length) e.recommendations = r.recommendations;
+  if (r.changes_from_last && r.changes_from_last !== '初回記録') e.changes = r.changes_from_last;
+  if (r.summary_jp) e.summary = r.summary_jp;
+  return e;
 }
 
 async function buildFullDigest(clientId, env) {
   const records = await env.DB.prepare(
     'SELECT visit_date, report_json FROM care_records WHERE client_id = ? ORDER BY visit_date DESC'
   ).bind(clientId).all();
-  return records.results.map(r => buildDigestBlock(r.visit_date, JSON.parse(r.report_json))).join('\n');
+  return records.results.map(r => buildDigestEntry(r.visit_date, JSON.parse(r.report_json)));
 }
 
 // ── LLM (DeepSeek) API Call ──
@@ -217,24 +217,25 @@ async function handleAsk(publicId, request, env, cors) {
   const q = (question || '').trim();
   if (!q) return Response.json({ error: 'question required' }, { status: 400, headers: cors });
 
-  let client = await env.DB.prepare('SELECT client_id, public_id, name, digest_md FROM clients WHERE public_id = ?').bind(publicId).first();
-  if (!client) client = await env.DB.prepare('SELECT client_id, public_id, name, digest_md FROM clients WHERE name = ?').bind(publicId).first();
+  let client = await env.DB.prepare('SELECT client_id, public_id, name, digest_json FROM clients WHERE public_id = ?').bind(publicId).first();
+  if (!client) client = await env.DB.prepare('SELECT client_id, public_id, name, digest_json FROM clients WHERE name = ?').bind(publicId).first();
   if (!client) return Response.json({ error: 'client not found' }, { status: 404, headers: cors });
 
-  // ダイジェスト未構築（既存データ）の場合は遅延ビルド
-  let digest = client.digest_md;
-  if (!digest) {
-    digest = await buildFullDigest(client.client_id, env);
-    if (digest) {
-      await env.DB.prepare('UPDATE clients SET digest_md = ? WHERE client_id = ?').bind(digest, client.client_id).run();
+  let arr = JSON.parse(client.digest_json || '[]');
+  // 既存データの遅延ビルド
+  if (!arr.length) {
+    arr = await buildFullDigest(client.client_id, env);
+    if (arr.length) {
+      await env.DB.prepare('UPDATE clients SET digest_json = ? WHERE client_id = ?').bind(JSON.stringify(arr), client.client_id).run();
     }
   }
 
-  if (!digest) {
-    return Response.json({ answer: 'この方の記録がまだありません。', sources: [] }, { headers: cors });
+  if (!arr.length) {
+    return Response.json({ answer: 'この方の記録がまだありません。' }, { headers: cors });
   }
+  const digest = JSON.stringify(arr, null, 2);
 
-  const systemPrompt = `あなたは訪問介護記録の分析アシスタントです。ニックネーム「${client.name}」の方の過去記録ダイジェスト（Markdown）を読み、ユーザーの質問に答えます。
+  const systemPrompt = `あなたは訪問介護記録の分析アシスタントです。ニックネーム「${client.name}」の方の過去記録ダイジェスト（JSON配列、新しい順）を読み、ユーザーの質問に答えます。
 
 【絶対ルール】
 1. ダイジェスト内に明示的に書かれた事実のみを根拠に回答する。推測・憶測・想像は禁止。
