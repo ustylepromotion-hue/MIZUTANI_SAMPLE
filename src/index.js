@@ -82,35 +82,95 @@ async function handleReport(request, env, cors) {
     'INSERT INTO care_records (client_id, visit_date, raw_text, report_json) VALUES (?, ?, ?, ?)'
   ).bind(client.client_id, date, raw_text, JSON.stringify(reportJson)).run();
 
-  // ── ダイジェスト増分更新（JSON配列、新しい順、LLM/機械処理しやすい形）──
+  // ── 階層メモリ更新 ──
   const entry = buildDigestEntry(date, reportJson);
-  const current = await env.DB.prepare('SELECT digest_json FROM clients WHERE client_id = ?').bind(client.client_id).first();
-  const arr = JSON.parse(current?.digest_json || '[]');
-  arr.unshift(entry);
-  await env.DB.prepare('UPDATE clients SET digest_json = ? WHERE client_id = ?').bind(JSON.stringify(arr), client.client_id).run();
+  const current = await env.DB.prepare('SELECT memory_json FROM clients WHERE client_id = ?').bind(client.client_id).first();
+  const mem = parseMemory(current?.memory_json);
+  await appendToMemory(mem, entry, env);
+  await env.DB.prepare('UPDATE clients SET memory_json = ? WHERE client_id = ?').bind(JSON.stringify(mem), client.client_id).run();
 
   return Response.json({ report: reportJson, history }, { headers: cors });
 }
 
-// ── ダイジェストエントリ（1訪問分のコンパクトなJSONオブジェクト）──
+// ── メモリ層管理 ──
+const RECENT_CAP = 10;
+const OLDER_CAP = 50;
+
+function parseMemory(s) {
+  try {
+    const m = JSON.parse(s || '{}');
+    return { long: m.long || '', older: m.older || [], recent: m.recent || [] };
+  } catch { return { long: '', older: [], recent: [] }; }
+}
+
 function buildDigestEntry(date, r) {
-  const e = { visit_date: date, severity: r.severity || 'green' };
+  const e = { d: date, s: r.severity || 'green' };
   if (r.tasks_performed?.length) e.tasks = r.tasks_performed;
-  if (r.client_condition) e.condition = r.client_condition;
+  if (r.client_condition) e.cond = r.client_condition;
   if (r.client_habits) e.habits = r.client_habits;
   if (r.issues?.length) e.issues = r.issues;
-  if (r.challenges?.length) e.challenges = r.challenges;
-  if (r.recommendations?.length) e.recommendations = r.recommendations;
-  if (r.changes_from_last && r.changes_from_last !== '初回記録') e.changes = r.changes_from_last;
-  if (r.summary_jp) e.summary = r.summary_jp;
+  if (r.challenges?.length) e.chal = r.challenges;
+  if (r.recommendations?.length) e.rec = r.recommendations;
+  if (r.changes_from_last && r.changes_from_last !== '初回記録') e.chg = r.changes_from_last;
+  if (r.summary_jp) e.sum = r.summary_jp;
   return e;
 }
 
-async function buildFullDigest(clientId, env) {
+function entryToOneLine(e) {
+  const core = e.sum || (e.tasks || []).join('+') || (e.issues || []).join(';') || '記録あり';
+  return `${e.d}/${e.s}: ${core}`.slice(0, 120);
+}
+
+async function appendToMemory(mem, entry, env) {
+  mem.recent.unshift(entry);
+  while (mem.recent.length > RECENT_CAP) {
+    const demoted = mem.recent.pop();
+    mem.older.unshift(entryToOneLine(demoted));
+  }
+  if (mem.older.length > OLDER_CAP) {
+    mem.long = await consolidateLongTerm(env, mem.long, mem.older);
+    mem.older = [];
+  }
+}
+
+async function consolidateLongTerm(env, prevLong, olderLines) {
+  const prompt = `以下は同一利用者の中期記憶（1行サマリー、新しい順）と既存の長期記憶です。これらを統合し、300字以内の長期記憶として書き直してください。
+
+【ルール】
+- 繰り返し起こる事象、慢性的な状態、人物特性、傾向を残す
+- 一過性の出来事、軽微な詳細は捨てる
+- 単一の文章のみ。前置き・メタ情報・見出し禁止
+- 推測禁止、事実のみ
+
+【既存の長期記憶】
+${prevLong || '（なし）'}
+
+【中期記憶】
+${olderLines.join('\n')}`;
+  const res = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${env.MIZUTANI_SAMPLE}` },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      max_tokens: 500,
+      temperature: 0.2,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) return prevLong; // 失敗時は既存維持
+  return (data.choices[0].message.content || '').trim().slice(0, 600);
+}
+
+async function buildMemoryFromRecords(clientId, env) {
   const records = await env.DB.prepare(
-    'SELECT visit_date, report_json FROM care_records WHERE client_id = ? ORDER BY visit_date DESC'
+    'SELECT visit_date, report_json FROM care_records WHERE client_id = ? ORDER BY visit_date ASC'
   ).bind(clientId).all();
-  return records.results.map(r => buildDigestEntry(r.visit_date, JSON.parse(r.report_json)));
+  const mem = { long: '', older: [], recent: [] };
+  for (const r of records.results) {
+    await appendToMemory(mem, buildDigestEntry(r.visit_date, JSON.parse(r.report_json)), env);
+  }
+  return mem;
 }
 
 // ── LLM (DeepSeek) API Call ──
@@ -217,31 +277,36 @@ async function handleAsk(publicId, request, env, cors) {
   const q = (question || '').trim();
   if (!q) return Response.json({ error: 'question required' }, { status: 400, headers: cors });
 
-  let client = await env.DB.prepare('SELECT client_id, public_id, name, digest_json FROM clients WHERE public_id = ?').bind(publicId).first();
-  if (!client) client = await env.DB.prepare('SELECT client_id, public_id, name, digest_json FROM clients WHERE name = ?').bind(publicId).first();
+  let client = await env.DB.prepare('SELECT client_id, public_id, name, memory_json FROM clients WHERE public_id = ?').bind(publicId).first();
+  if (!client) client = await env.DB.prepare('SELECT client_id, public_id, name, memory_json FROM clients WHERE name = ?').bind(publicId).first();
   if (!client) return Response.json({ error: 'client not found' }, { status: 404, headers: cors });
 
-  let arr = JSON.parse(client.digest_json || '[]');
+  let mem = parseMemory(client.memory_json);
   // 既存データの遅延ビルド
-  if (!arr.length) {
-    arr = await buildFullDigest(client.client_id, env);
-    if (arr.length) {
-      await env.DB.prepare('UPDATE clients SET digest_json = ? WHERE client_id = ?').bind(JSON.stringify(arr), client.client_id).run();
+  if (!mem.recent.length && !mem.older.length && !mem.long) {
+    mem = await buildMemoryFromRecords(client.client_id, env);
+    if (mem.recent.length || mem.older.length) {
+      await env.DB.prepare('UPDATE clients SET memory_json = ? WHERE client_id = ?').bind(JSON.stringify(mem), client.client_id).run();
     }
   }
-
-  if (!arr.length) {
+  if (!mem.recent.length && !mem.older.length && !mem.long) {
     return Response.json({ answer: 'この方の記録がまだありません。' }, { headers: cors });
   }
-  const digest = JSON.stringify(arr, null, 2);
 
-  const systemPrompt = `あなたは訪問介護記録の分析アシスタントです。ニックネーム「${client.name}」の方の過去記録ダイジェスト（JSON配列、新しい順）を読み、ユーザーの質問に答えます。
+  const digest = `## 長期記憶（要約）\n${mem.long || '（まだ蓄積なし）'}\n\n## 中期記憶（${mem.older.length}件、新しい順、1行）\n${mem.older.join('\n') || '（なし）'}\n\n## 直近${mem.recent.length}件（詳細JSON）\n${JSON.stringify(mem.recent)}`;
+
+  const systemPrompt = `あなたは訪問介護記録の分析アシスタントです。ニックネーム「${client.name}」の方の階層メモリ（長期/中期/直近詳細）を読み、ユーザーの質問に答えます。
+
+【メモリ構造】
+- 長期記憶: 過去の傾向や慢性的特性の要約
+- 中期記憶: それぞれの訪問の1行サマリー（日付/severity/要点）
+- 直近詳細: 直近10件のJSON（キー: d=日付, s=severity, tasks, cond=状態, habits=癖, issues, chal=課題, rec=次回提案, chg=前回比, sum=要約）
 
 【絶対ルール】
-1. ダイジェスト内に明示的に書かれた事実のみを根拠に回答する。推測・憶測・想像は禁止。
-2. 記録に無い事実を断定してはいけない。該当情報が無ければ「記録にはありません」と簡潔に伝える。
-3. 事実に基づく実務的な提案や、介護・医療・生活援助の一般知識による補足は可能。
-4. ユーザーが「出典」「ソース」「どの日か」等を明示的に求めた場合のみ訪問日を添える。それ以外は日付や出典表記を出さない。
+1. メモリ内に明示的に書かれた事実のみを根拠に回答する。推測・憶測は禁止。
+2. 記録に無い事実を断定してはいけない。該当無ければ「記録にはありません」と簡潔に。
+3. 事実に基づく実務提案や、介護・医療・生活援助の一般知識による補足は可能。
+4. ユーザーが「出典」「ソース」「どの日か」等を明示的に求めた場合のみ訪問日を添える。
 5. プライバシー保護のため本名は不明。ニックネームのみで指す。
 
 【出力スタイル】
