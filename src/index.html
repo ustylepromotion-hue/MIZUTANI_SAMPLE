@@ -745,7 +745,7 @@ header .sub {
         <h3>🔍 過去記録に質問する</h3>
         <p class="desc">この利用者の過去レポートをAIが巡回して回答します。<b>記録に書かれた事実のみ</b>を根拠とし、事実に基づく提案や一般的な介護知識の補足をしてくれます。</p>
         <div class="rag-input-row">
-          <input type="text" id="ragInput" placeholder="例: 入浴を嫌がる傾向は？ 服薬で気になることは？" onkeydown="if(event.key==='Enter')askRag()">
+          <input type="text" id="ragInput" placeholder="例: 入浴を嫌がる傾向は？ 服薬で気になることは？">
           <button id="ragBtn" onclick="askRag()">質問</button>
         </div>
         <div class="rag-answer" id="ragAnswer"></div>
@@ -1054,9 +1054,7 @@ async function askRag() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
 
-    const highlighted = esc(data.answer).replace(/\[出典(\d+)\]/g, '<mark>[出典$1]</mark>');
-    const srcList = (data.sources || []).map(s => `[出典${s.index}] ${s.visit_date}`).join(' / ');
-    out.innerHTML = highlighted + (srcList ? `<div class="src-list">参照: ${esc(srcList)}</div>` : '');
+    out.innerHTML = esc(data.answer);
   } catch (e) {
     out.innerHTML = '<span style="color:var(--red);">エラー: ' + esc(e.message) + '</span>';
   } finally {
