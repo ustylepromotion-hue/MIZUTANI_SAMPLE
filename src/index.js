@@ -204,7 +204,15 @@ async function callClaude(apiKey, rawText, clientName, visitDate, history) {
 - issues と challenges は分けて記載。issuesは当日の問題、challengesは継続的な課題
 - recommendations は具体的なアクションを記載
 - severity: 通常=green、要注意=yellow、緊急対応要=red
-- 過去の記録がある場合、changes_from_last で前回との差分を必ず記載`;
+- 過去の記録がある場合、changes_from_last で前回との差分を必ず記載
+
+【summary_jp（管理者向けサマリー）の絶対ルール】
+- ソースは「本日の記録（生テキスト）」と「過去の記録」のみ。それ以外を一切参照しない。
+- 推測・憶測・脚色・印象論を禁止。「〜と思われる」「〜の可能性がある」「〜と感じられる」等の表現も禁止。
+- 生テキストに書かれていない事実は書かない（例: 体温/血圧/家族構成等が記述されていなければ言及しない）。
+- 一般論や介護知識による補足を summary_jp 内で混ぜない（それは別途 recommendations 等で扱う）。
+- 事実を時系列・カテゴリ順に並べ、3〜5行で簡潔にまとめる。形容詞は最小限。
+- 不明な点は「記載なし」と明示。創作で穴埋めしない。`;
 
   const userMessage = `## 利用者: ${clientName}
 ## 訪問日: ${visitDate}
