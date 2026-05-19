@@ -2,7 +2,31 @@
 
 次にこのフォルダ触る人（人間でも次回のClaudeでも）向けの引き継ぎ。READMEには書かない、「やらかしと回避策」をここに残す。
 
-最終更新: 2026-05-18
+最終更新: 2026-05-19
+
+## 2026-05-18〜19 セッションでの主な変更
+- フォルダ rename: `care-report-demo` → `ISSEIレポートメーカー`、ヘッダー/タイトルも変更
+- レポート各セクションを contenteditable 化、黄色枠＋編集ヒントで「触れる」UI
+- 利用者ID: `clients.public_id` 追加（C-XXXXXX, 衝突回避ランダム）、`name` の UNIQUE 撤廃で同姓同名OK
+- 利用者一覧に編集/削除ボタン、削除はニックネームタイピング確認モーダル
+- 履歴を日付ごとアコーディオン化、前後ナビ＋全開閉、初期は最新だけ展開
+- RAG 検索 (`POST /api/ask/:public_id`): 出典内事実のみ回答、推測禁止、事実ベース提案/一般知識補足は可
+- RAGは「質問」ボタン押下時のみ作動（Enter発火を撤去）、出力は3〜5行で簡潔、出典は明示要求時のみ
+- GitHub Pages 修正: ルートに `index.html` リダイレクト＋`.nojekyll`。素のREADME表示を停止し Worker 本体へ遷移
+- 本名NG → ニックネーム運用に切替（UI全箇所、システムプロンプトも対応）
+- 階層メモリ導入（`memory_json` = {long, older, recent}）。記録は無限蓄積だがLLMコンテキストは~4000tok固定。50件超で long を LLM 再要約（300字）
+- `summary_jp` 生成プロンプトに厳格ルール: ソースは生テキスト+過去記録のみ、推測・脚色・ヘッジ表現禁止、不明は「記載なし」
+
+## マイグレーション履歴
+- 0001_add_public_id.sql — clients再構築、public_id追加、name UNIQUE撤廃
+- 0002_add_digest.sql — digest_md 追加（後に廃止）
+- 0003_digest_json.sql — digest_md → digest_json（JSON配列）
+- 0004_memory.sql — digest_json → memory_json（{long, older, recent}）
+
+すべて remote 適用済み。バックアップは `backup_20260518_155753.sql`。
+
+---
+（以下、元の内容）
 
 ---
 
